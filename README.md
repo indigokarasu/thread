@@ -235,11 +235,3 @@ Thread is maintained as part of the Indigo open-source toolkit. Feedback, bug re
 
 ---
 
-## See Also
-
-- **Elephas** — Chronicle (memory) management
-- **Corvus** — Pattern discovery and novelty detection
-- **Taste** — Preference learning and ranking
-- **Sift** — Search optimization and query rewriting
-- **Praxis** — Task execution and action synthesis
-- **Mentor** — Skill refinement and heuristic learning
