@@ -21,16 +21,6 @@ Thread observes only. It does not browse, replay sessions, write to Chronicle di
 - Proposes durable topics and sources to Elephas as Chronicle candidates
 - Exposes tools for seen/unseen checks, thread context, preferred sources
 
-### What Thread Does Not Do
-
-- Write directly to Chronicle (proposes to Elephas only)
-- Create Taste preferences (proposes for evaluation)
-- Browse, replay, or execute actions
-- Replace Chronicle, Taste, Corvus, Sift, or Praxis
-- Archive raw browser logs (emits only derived signals and summaries)
-
----
-
 ## Quick Start
 
 ### Installation

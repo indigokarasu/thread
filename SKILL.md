@@ -24,10 +24,6 @@ Given a snapshot of Chrome History, thread:
 6. **Proposes Chronicle candidates** to Elephas for durable memory storage
 7. **Exposes tools** for seen/unseen checks, thread context, preferred sources, and research summaries
 
-Thread does not replace: Chronicle (memory), Taste (preferences), Corvus (pattern discovery), Sift (search), Praxis (task execution).
-
----
-
 ## Ingestion
 
 ### Mode 1: Local Near-Realtime (Mac with active Chrome)
