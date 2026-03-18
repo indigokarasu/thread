@@ -1,209 +1,237 @@
 ---
 name: ocas-thread
-description: Reconstructs Chrome browser sessions and research threads to derive engagement signals and interest candidates. Proposes stable topics and sources to Elephas as Chronicle candidates. Use when asked to analyze browsing history, reconstruct research activities, check seen/unseen status, detect emerging interests, or provide thread context for downstream skills (Corvus, Sift, Elephas, Praxis, Taste). Trigger for any request involving browser activity interpretation, session reconstruction, or research thread analysis.
-metadata: {"openclaw":{"emoji":"🧵","requires":{"bins":["python3","sqlite3"]}}}
+description: Personal web activity interpretation. Reconstructs browsing sessions and research threads from searches, site visits, engagement signals, and downloads. Derives interests, source affinities, and seen/unseen status. Emits journals and Chronicle candidates for downstream skills. Private skill -- do not distribute.
+metadata: {"openclaw":{"emoji":"🧵"}}
 ---
 
-# ocas-thread
+# Thread
 
-Ingest Chrome browser activity, reconstruct sessions and research threads, derive engagement and interest signals, and emit structured journals with Chronicle promotion candidates.
+Thread interprets browser activity to reconstruct coherent lines of exploration over time. It ingests browsing activity, organizes it into sessions and research threads, derives engagement and interest signals, and emits journals and Chronicle candidates for downstream skills.
 
-Thread observes only. It does not browse, replay sessions, write to Chronicle directly, or execute actions.
+Thread is observational only. It does not browse the web, replay sessions, write raw logs to Chronicle, execute actions, or make recommendations directly.
 
----
+This skill is private and must never be published or distributed.
 
-## Core Responsibility
+## When to use
 
-Given a snapshot of Chrome History, thread:
+Thread operates in the background. It is useful when the system needs to know:
+- What the user has already seen
+- What topics the user is actively researching
+- Which sources are useful or unhelpful
+- What interests are strengthening over time
+- Which searches ended in satisfaction vs frustration
+- What content is new vs already consumed
 
-1. **Normalizes** browser events to canonical schema (search queries, web visits, typed navigation, downloads, bookmarks, form submissions, redirects)
-2. **Classifies** engagement: dwell time, interaction depth, signal strength
-3. **Reconstructs sessions** by merging adjacent events with topical continuity
-4. **Reconstructs research threads** by merging overlapping sessions (shared entities, concepts, domains, query reformulation)
-5. **Detects interest candidates** by scoring stability, recurrence, and engagement depth
-6. **Proposes Chronicle candidates** to Elephas for durable memory storage
-7. **Exposes tools** for seen/unseen checks, thread context, preferred sources, and research summaries
+## When not to use
 
-## Ingestion
+- Web research — use Sift
+- Knowledge graph writes — use Elephas
+- Pattern discovery — use Corvus
+- Preference persistence — use Taste
+- Action execution — use Praxis
 
-### Mode 1: Local Near-Realtime (Mac with active Chrome)
+## Responsibility boundary
 
-Run `scripts/snapshot_chrome_history.py` to safely copy the locked History database before querying.
+Thread owns browsing-derived behavioral interpretation: ingestion, normalization, session reconstruction, research thread reconstruction, source affinity, seen/unseen checks, interest candidate detection, and signal emission.
 
-Default source path:
-```
-~/Library/Application Support/Google/Chrome/Default/History
-```
+Thread does not own: durable memory (Elephas/Chronicle), preferences (Taste), pattern discovery (Corvus), web search (Sift), task actions (Praxis).
 
-Recommended polling: every 60–120 seconds.
+## Core principle
+
+Raw browsing history is not memory. Raw events remain in Thread's local datastore. Only derived signals, structured summaries, and promotion candidates may be proposed to Elephas. This prevents Chronicle from becoming a browser log archive.
+
+## Inputs
+
+### Mode 1: Local Near-Realtime Ingestion
+Chrome History SQLite database (read from a copied snapshot, not the live locked file).
+Expected source: `~/Library/Application Support/Google/Chrome/Default/History`
+Polling target: every 60-120 seconds.
 
 ### Mode 2: Remote Delayed Sync
+A local exporter pushes normalized browser activity. Suggested cadence: daily. Must produce the same normalized event schema.
 
-Exporter on user machine normalizes events and pushes on schedule (suggested: daily). Remote sync must emit the same normalized event schema as local ingestion.
+## Normalized event schema
 
-**Critical:** Always snapshot before querying. Never read from the live locked database directly.
+All ingestion paths normalize to a shared event model with fields: event_id, event_type, timestamp, url, domain, title, search_query, referrer_url, referrer_domain, visit_duration, engagement_signal, device, source, session_hint, metadata.
 
----
+Supported event types: search_query, web_visit, typed_navigation, download, bookmark_add, bookmark_open, form_submission, redirect.
 
-## Normalization
+## Derived signals
 
-Convert all ingested events to the canonical schema before any downstream processing.
+**Dwell time** — computed from timestamps and navigation order.
 
-**Schema reference:** Read `references/event_schema.md` for field definitions and rules.
+**Engagement signal** — classified per visit: bounce, short_click (0-10s), neutral_click (10-60s), long_click (>60s), deep_engagement (>180s). Upper-bound noise guard for implausible idle windows.
 
-**Supported event types:** `search_query`, `web_visit`, `typed_navigation`, `download`, `bookmark_add`, `bookmark_open`, `form_submission`, `redirect`
+**Query reformulation** — detect evolving intent sequences (e.g., "surya" → "surya ocr" → "surya ocr benchmarks").
 
-**Compute for every event:**
-- **Dwell time:** `next_navigation_timestamp - current_timestamp`
-- **Engagement signal:** bounce / short_click / neutral_click / long_click / deep_engagement (see `references/session_reconstruction.md` for thresholds)
-- **Query reformulation:** Detect escalating specificity chains (e.g., `llm` → `llm inference` → `llm inference optimization`)
-- **Source affinity:** Track domain revisits, long-clicks, and typed navigation (see `references/session_reconstruction.md`)
+**Source affinity** — repeated long-clicks, revisits, and typed navigation strengthen domain affinity.
 
----
+**Seen/unseen** — tracks whether a URL, domain, or resource has been seen. Useful to Sift and Praxis.
 
-## Session Reconstruction
+**Research depth** — long navigation chains, revisits, and downloads increase thread depth score.
 
-Merge normalized events into sessions using:
-- Time proximity (inactivity gap: 20–30 min, configurable)
-- Referrer chains
-- Search result click chains
-- Overlapping entities and concepts
-- Continuous topical behavior
+## Session reconstruction
 
-**Principle:** Prefer merging events that belong together over strict timer-based splits.
+Group events into browsing sessions using: time proximity, referrer chains, search-result click chains, overlapping entities, continuous topical behavior. Default heuristic: new session if inactivity > 20-30 minutes. Merge events that clearly belong together even if timer would split them.
 
-**Full merge logic:** Read `references/session_reconstruction.md`
+Session output: session_id, start_time, end_time, primary_queries, domains_visited, long_click_count, downloads, candidate_entities, candidate_concepts, engagement_summary.
 
----
+## Research thread reconstruction
 
-## Research Thread Reconstruction
+A research thread is a coherent line of exploration spanning multiple sessions across days or weeks. Merge sessions using: overlapping search terms, overlapping entities, overlapping concepts, repeated domains, temporal recurrence, reformulation continuity.
 
-Merge sessions into research threads using:
-- Overlapping search terms
-- Overlapping extracted entities
-- Overlapping concepts
-- Repeated domains and source affinity
-- Temporal recurrence
-- Query reformulation continuity
+Thread output: thread_id, topic_label, first_seen, last_seen, sessions, primary_queries, entities, concepts, sources, engagement_summary, thread_strength, novelty_score, interest_candidate.
 
-**Merge rule:** Any condition sufficient:
-- ≥2 shared entities (high confidence)
-- 1 high-confidence shared entity + strong query similarity
-- Clear reformulation chain continuity
+## Interest detection
 
-**Full merge logic and thread schema:** Read `references/session_reconstruction.md`
+Flag interest_candidate = true when: sessions >= 3, long_clicks >= 3, entity/concept overlap is high, behavior spans more than one day or session cluster.
 
----
+Thread does not create Taste records directly. Interest candidates are passed to Corvus and Elephas through journals and intake files.
 
-## Ontology
+## Commands
 
-Thread uses Chronicle-aligned ontology from `references/thread_ontology.md`.
+- `thread.recent_searches` — recent search queries
+- `thread.recent_visits` — recent site visits
+- `thread.search_history` — search history for a query or topic
+- `thread.has_seen` — check if a URL or domain has been visited
+- `thread.active_threads` — currently active research threads
+- `thread.recent_threads` — most recent research threads
+- `thread.thread_for_topic` — research thread for a specific topic
+- `thread.preferred_sources` — preferred sources for a topic
+- `thread.interest_candidates` — current interest candidates
+- `thread.research_summary` — summary of research on a topic
+- `thread.domain_affinity` — affinity score for a domain
+- `thread.long_click_sources` — sources with long-click engagement for a topic
+- `thread.status` — ingestion state, session count, thread count, last activity
+- `thread.journal` — write journal for the current run; called at end of every run
 
-**Node classes:** Entity, Concept, Thing, Activity, Thread, Source, Interest, Signal
+## Inter-skill interfaces
 
-**Relationship types:** researched, visited, searched_for, engaged_with, downloaded, reformulated_to, led_to, part_of_thread, indicates_interest_in, prefers_source_for, has_seen
+Thread writes research thread signals to Corvus at: `~/openclaw/data/ocas-corvus/intake/{thread_id}.json`
+Written when a research thread reaches sufficient depth to be an interest candidate.
 
----
+Thread writes Chronicle candidates to Elephas at: `~/openclaw/db/ocas-elephas/intake/{candidate_id}.signal.json`
+Written only for high-quality candidates: interest candidates with session_count >= 3, long_click_count >= 3. Raw browsing events must never be written to Chronicle.
 
-## Output Journals
+Good candidates: stable research topics, durable interests, preferred sources, repeated entity/topic relationships.
+Bad candidates: raw URL visits, short clicks, single-page bounces.
 
-Emit three journal types. **Full field definitions:** Read `references/journal_spec.md`
+See `spec-ocas-interfaces.md` for signal format and handoff contracts.
 
-| Journal | Purpose | Audience |
-|---------|---------|----------|
-| `thread_activity_journal` | Low-level normalized events; dwell analysis and debugging | Debug / downstream analysis |
-| `thread_session_journal` | Session bursts with topical focus; immediate intent grouping | Real-time activity tracking |
-| `thread_research_journal` | Cross-session research threads with stable topics and candidates | **Primary output:** feeds Corvus, Elephas, Taste, Sift, Mentor |
+## Privacy and data minimization
 
-**Default primary artifact:** `thread_research_journal`
+- Ignore chrome:// pages, new-tab pages, extension pages
+- Ignore localhost unless explicitly configured
+- Deduplicate repeated instant reloads
+- Cap or discard implausible idle dwell windows
+- Prefer derived insight over raw retention
 
----
-
-## Chronicle Promotion
-
-Thread never writes to Chronicle directly. Propose candidates to Elephas via `research_journal.chronicle_candidates` field.
-
-**Good candidates:** Stable topics, durable interests, preferred sources, recurring entity relationships
-
-**Bad candidates:** Individual URL visits, single-click events, short-duration visits
-
-**Promotion rules and examples:** Read `references/chronicle_boundary.md`
-
----
-
-## Interest Detection
-
-Flag `interest_candidate: true` when all hold:
-- ≥3 sessions on the topic
-- ≥3 long_click events
-- High entity or concept overlap
-- Behavior spans ≥2 days or session clusters
-
-Pass flagged interests to Corvus and Elephas via research journal. Thread does not create Taste records directly.
-
----
-
-## Tool Surface
+## Storage layout
 
 ```
-thread.recent_searches(n)              # Last n search queries
-thread.recent_visits(n)                # Last n web visits
-thread.search_history(query)           # All searches matching query
-thread.has_seen(url_or_domain)         # Seen/unseen check
-thread.active_threads()                # Currently open research threads
-thread.recent_threads(n)               # Last n completed threads
-thread.thread_for_topic(topic)         # Thread matching topic
-thread.preferred_sources(topic)        # Highest-affinity domains
-thread.interest_candidates()           # Detected interests with scores
-thread.research_summary(topic)         # Summary of research on topic
-thread.domain_affinity(domain)         # Engagement score for domain
-thread.long_click_sources(topic)       # Sources visited deeply
+~/openclaw/data/ocas-thread/
+  config.json
+  events.jsonl
+  sessions.jsonl
+  threads.jsonl
+  interests.jsonl
+  decisions.jsonl
+
+~/openclaw/journals/ocas-thread/
+  YYYY-MM-DD/
+    {run_id}.json
 ```
 
-All functions return structured results from derived signals, never raw database rows.
+The OCAS_ROOT environment variable overrides `~/openclaw` if set.
 
----
+Default config.json:
+```json
+{
+  "skill_id": "ocas-thread",
+  "skill_version": "2.0.0",
+  "config_version": "1",
+  "created_at": "",
+  "updated_at": "",
+  "ingestion": {
+    "mode": "local",
+    "poll_interval_seconds": 90,
+    "chrome_profile": "Default"
+  },
+  "engagement": {
+    "short_click_max_seconds": 10,
+    "neutral_click_max_seconds": 60,
+    "long_click_min_seconds": 60,
+    "deep_engagement_min_seconds": 180,
+    "idle_cap_seconds": 3600
+  },
+  "session": {
+    "inactivity_gap_minutes": 25
+  },
+  "interest": {
+    "min_sessions": 3,
+    "min_long_clicks": 3
+  },
+  "retention": {
+    "days": 90,
+    "max_records": 50000
+  }
+}
+```
 
-## Privacy and Data Minimization
+## OKRs
 
-**Ignored:** `chrome://` pages, new-tab pages, extension pages, localhost (unless configured), instant reload duplicates.
+Universal OKRs from spec-ocas-journal.md apply to all runs.
 
-**Applied:** Idle dwell noise guard (see `references/session_reconstruction.md`)
+```yaml
+skill_okrs:
+  - name: session_reconstruction_accuracy
+    metric: fraction of sessions correctly grouping related events
+    direction: maximize
+    target: 0.95
+    evaluation_window: 30_runs
+  - name: thread_merge_precision
+    metric: fraction of thread merges confirmed correct
+    direction: maximize
+    target: 0.90
+    evaluation_window: 30_runs
+  - name: chronicle_candidate_precision
+    metric: fraction of Chronicle candidates confirmed useful by Elephas
+    direction: maximize
+    target: 0.90
+    evaluation_window: 30_runs
+  - name: raw_event_chronicle_leak
+    metric: count of raw browsing events written to Chronicle
+    direction: minimize
+    target: 0
+    evaluation_window: 30_runs
+```
 
-**Data retention:** Raw events remain local. Only derived signals and promotion candidates leave thread.
+## Optional skill cooperation
 
----
+- Elephas — receives Chronicle candidate signals via intake directory
+- Corvus — receives research thread signals via intake directory
+- Sift — may use Thread context for query rewriting (cooperative, not dependency)
+- Taste — may use repeated stable thread signals to inform preferences
+- Praxis — may use seen/unseen checks to avoid redundant suggestions
+- Mentor — may analyze Thread journals to improve thresholds and merge logic
 
-## Skill Cooperation
+Thread must function when all cooperating skills are absent.
 
-Thread functions independently but cooperates with other skills when present:
+## Journal outputs
 
-| Skill | Thread provides |
-|-------|-----------------|
-| Elephas | Research journals + Chronicle candidates |
-| Corvus | Research journals for pattern and novelty detection |
-| Sift | Recent thread context for query rewriting |
-| Praxis | Seen/unseen status for deduplication |
-| Taste | Stable thread signals for preference proposal |
-| Mentor | Journals for threshold and heuristic refinement |
+Observation Journal — all ingestion, session reconstruction, and thread analysis runs.
 
----
+Thread emits three journal subclasses (all Observation type):
+- thread_activity_journal — low-level normalized activity events
+- thread_session_journal — session reconstructions
+- thread_research_journal — research thread reconstructions (primary cross-skill artifact)
 
-## Scripts
+## Visibility
 
-| Script | Purpose |
-|--------|---------|
-| `scripts/snapshot_chrome_history.py` | Safe snapshot of locked Chrome History DB before ingestion |
-| `scripts/validate_thread_output.py` | Validates output journal schema compliance |
+private
 
----
+## Support file map
 
-## Reference Files
-
-| File | When to read |
-|------|-------------|
-| `references/event_schema.md` | Before normalizing ingested events |
-| `references/session_reconstruction.md` | Before computing dwell signals, sessions, threads, or affinity |
-| `references/thread_ontology.md` | When extracting entities or building graph candidates |
-| `references/journal_spec.md` | When emitting any journal type |
-| `references/chronicle_boundary.md` | When deciding what to propose as Chronicle candidates |
+File | When to read
+`references/schemas.md` | Before creating events, sessions, threads, or candidates
+`references/journal.md` | Before thread.journal; at end of every run
